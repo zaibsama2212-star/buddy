@@ -40,7 +40,7 @@
       var chosen = voices[document.getElementById("voiceList").value];
       if (chosen) { msg.voice = chosen; msg.lang = chosen.lang; } else { msg.lang = "en-IN"; }
       msg.pitch = parseFloat(document.getElementById("pitch").value);
-      msg.rate = 0.9;
+      msg.rate = 1.1;
       window.speechSynthesis.cancel();
       window.speechSynthesis.speak(msg);
     }
