@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BUDDY</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; padding: 40px 20px; background: #0f172a; color: white; }
+    h1 { font-size: 48px; }
+    button { font-size: 24px; padding: 20px 40px; border: none; border-radius: 50px; background: #38bdf8; color: #0f172a; }
+  </style>
+</head>
+<body>
+  <h1>BUDDY</h1>
+  <p>Your personal assistant</p>
+  <button onclick="sayHello()">Tap to say Good Morning</button>
+  <script>
+    function sayHello() {
+      var msg = new SpeechSynthesisUtterance("Good morning! How can I help you today?");
+      msg.lang = "en-IN";
+      window.speechSynthesis.speak(msg);
+    }
+  </script>
+</body>
+</html>
