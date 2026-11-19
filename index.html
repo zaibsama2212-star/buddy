@@ -10,13 +10,12 @@
     button { font-size: 24px; padding: 20px 40px; margin: 10px; border: none; border-radius: 50px; background: #38bdf8; color: #0f172a; }
     select, input { font-size: 18px; margin: 10px; padding: 8px; max-width: 90%; }
     #heard { font-size: 22px; color: #facc15; min-height: 30px; }
+    #answer { font-size: 22px; color: #86efac; min-height: 30px; max-width: 800px; margin: 10px auto; }
   </style>
 </head>
 <body>
   <h1>BUDDY</h1>
   <p>Your personal assistant</p>
-  <button onclick="sayHello()">Tap to say Good Morning</button>
-  <br>
   <button id="micBtn" onclick="startListening()">🎤 Tap to Talk</button>
   <p>I will listen in:</p>
   <select id="langList">
@@ -25,12 +24,15 @@
     <option value="gu-IN">Gujarati</option>
   </select>
   <p id="heard"></p>
+  <p id="answer"></p>
   <p>Voice:</p>
   <select id="voiceList"></select>
   <p>Deepness (lower = deeper):</p>
   <input type="range" id="pitch" min="0.1" max="1.5" step="0.1" value="0.5">
   <script>
+    var BRAIN_URL = "https://buddy-brain.zaibsama2212.workers.dev";
     var voices = [];
+
     function loadVoices() {
       voices = window.speechSynthesis.getVoices();
       var list = document.getElementById("voiceList");
@@ -44,6 +46,12 @@
     }
     loadVoices();
     window.speechSynthesis.onvoiceschanged = loadVoices;
+
+    function pickLang(text) {
+      if (/[\u0A80-\u0AFF]/.test(text)) return "gu-IN";
+      if (/[\u0900-\u097F]/.test(text)) return "hi-IN";
+      return "en-IN";
+    }
 
     function speak(text, lang) {
       var msg = new SpeechSynthesisUtterance(text);
@@ -59,8 +67,22 @@
       window.speechSynthesis.speak(msg);
     }
 
-    function sayHello() {
-      speak("Good morning! How can I help you today?", "en-IN");
+    function askBuddy(text) {
+      var answer = document.getElementById("answer");
+      answer.textContent = "BUDDY is thinking...";
+      fetch(BRAIN_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          answer.textContent = "BUDDY: " + d.reply;
+          speak(d.reply, pickLang(d.reply));
+        })
+        .catch(function () {
+          answer.textContent = "BUDDY could not reach its brain.";
+        });
     }
 
     function startListening() {
@@ -68,22 +90,30 @@
       var heard = document.getElementById("heard");
       var btn = document.getElementById("micBtn");
       if (!SR) { heard.textContent = "Speech listening is not supported in this browser."; return; }
-      var lang = document.getElementById("langList").value;
       var rec = new SR();
-      rec.lang = lang;
+      rec.lang = document.getElementById("langList").value;
       rec.interimResults = false;
-      rec.onstart = function () { btn.textContent = "🎤 Listening..."; heard.textContent = ""; };
+      rec.onstart = function () {
+        btn.textContent = "🎤 Listening...";
+        heard.textContent = "";
+      };
       rec.onresult = function (e) {
         var text = e.results[0][0].transcript;
         heard.textContent = "You said: " + text;
         if (text.toLowerCase().indexOf("good morning") !== -1) {
-          speak("Good morning! How can I help you today?", "en-IN");
+          var greet = "Good morning! How can I help you today?";
+          document.getElementById("answer").textContent = "BUDDY: " + greet;
+          speak(greet, "en-IN");
         } else {
-          speak("You said: " + text, lang);
+          askBuddy(text);
         }
       };
-      rec.onerror = function (e) { heard.textContent = "Mic problem: " + e.error; };
-      rec.onend = function () { btn.textContent = "🎤 Tap to Talk"; };
+      rec.onerror = function (e) {
+        heard.textContent = "Mic problem: " + e.error;
+      };
+      rec.onend = function () {
+        btn.textContent = "🎤 Tap to Talk";
+      };
       rec.start();
     }
   </script>
