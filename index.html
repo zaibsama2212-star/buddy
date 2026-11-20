@@ -42,6 +42,7 @@
   <script>
     var BRAIN_URL = "https://buddy-brain.zaibsama2212.workers.dev";
     var currentAudio = null;
+    var playToken = 0;
 
     function pickLang(text) {
       if (/[\u0A80-\u0AFF]/.test(text)) return "gu-IN";
@@ -49,44 +50,72 @@
       return "en-IN";
     }
 
-    function browserSpeak(text) {
+    function browserSpeak(text, done) {
       var msg = new SpeechSynthesisUtterance(text);
       msg.lang = pickLang(text);
       msg.rate = 1.1;
-      window.speechSynthesis.cancel();
+      msg.onend = function () { if (done) done(); };
+      msg.onerror = function () { if (done) done(); };
       window.speechSynthesis.speak(msg);
+    }
+
+    function splitSentences(text) {
+      var parts = text.match(/[^.!?\u0964]+[.!?\u0964]*/g) || [text];
+      var merged = [];
+      parts.forEach(function (p) {
+        p = p.trim();
+        if (!p) return;
+        if (merged.length && p.length < 25) {
+          merged[merged.length - 1] += " " + p;
+        } else {
+          merged.push(p);
+        }
+      });
+      return merged.slice(0, 4);
+    }
+
+    function fetchVoice(sentence, voice) {
+      return fetch(BRAIN_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tts: sentence, voice: voice })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { return d.audio ? d : null; })
+        .catch(function () { return null; });
     }
 
     function speak(text) {
       var status = document.getElementById("status");
+      playToken++;
+      var myToken = playToken;
       if (currentAudio) { currentAudio.pause(); currentAudio = null; }
       window.speechSynthesis.cancel();
+      var sentences = splitSentences(text);
+      var voice = document.getElementById("voiceList").value;
+      var jobs = sentences.map(function (s) { return fetchVoice(s, voice); });
       status.textContent = "BUDDY is getting its voice ready...";
-      fetch(BRAIN_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tts: text, voice: document.getElementById("voiceList").value })
-      })
-        .then(function (r) { return r.json(); })
-        .then(function (d) {
-          if (!d.audio) {
-            status.textContent = d.error ? d.error : "Voice not available, using the basic voice.";
-            browserSpeak(text);
+
+      function playNext(i) {
+        if (myToken !== playToken) return;
+        if (i >= jobs.length) { status.textContent = ""; return; }
+        jobs[i].then(function (d) {
+          if (myToken !== playToken) return;
+          if (!d) {
+            status.textContent = "Using the basic voice for this part.";
+            browserSpeak(sentences[i], function () { playNext(i + 1); });
             return;
           }
           var audio = new Audio("data:" + (d.mime || "audio/wav") + ";base64," + d.audio);
           currentAudio = audio;
-          audio.onended = function () { status.textContent = ""; };
+          audio.onended = function () { playNext(i + 1); };
           status.textContent = "BUDDY is speaking...";
           audio.play().catch(function () {
-            status.textContent = "Tap the page once, then try again.";
-            browserSpeak(text);
+            browserSpeak(sentences[i], function () { playNext(i + 1); });
           });
-        })
-        .catch(function () {
-          status.textContent = "Voice not reachable, using the basic voice.";
-          browserSpeak(text);
         });
+      }
+      playNext(0);
     }
 
     function testVoice() {
