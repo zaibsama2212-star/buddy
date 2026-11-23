@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BUDDY</title>
   <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#0f172a">
-<script>if ("serviceWorker" in navigator) { navigator.serviceWorker.register("sw.js"); }</script>
+  <meta name="theme-color" content="#0f172a">
+  <script>if ("serviceWorker" in navigator) { navigator.serviceWorker.register("sw.js"); }</script>
   <style>
     body { font-family: sans-serif; text-align: center; padding: 40px 20px; background: #0f172a; color: white; }
     h1 { font-size: 48px; }
     button { font-size: 24px; padding: 20px 40px; margin: 10px; border: none; border-radius: 50px; background: #38bdf8; color: #0f172a; }
+    #wakeBtn { background: #a78bfa; }
     #testBtn { font-size: 18px; padding: 12px 24px; background: #94a3b8; }
     select { font-size: 18px; margin: 10px; padding: 8px; max-width: 90%; }
     #heard { font-size: 22px; color: #facc15; min-height: 30px; }
@@ -21,6 +22,8 @@
 <body>
   <h1>BUDDY</h1>
   <p>Your personal assistant</p>
+  <button id="wakeBtn" onclick="toggleWake()">👂 Start Listening</button>
+  <br>
   <button id="micBtn" onclick="startListening()">🎤 Tap to Talk</button>
   <p>I will listen in:</p>
   <select id="langList">
@@ -46,6 +49,23 @@
     var BRAIN_URL = "https://buddy-brain.zaibsama2212.workers.dev";
     var currentAudio = null;
     var playToken = 0;
+    var busy = false;
+    var busyTimer = null;
+    var listening = false;
+    var awaiting = false;
+    var awaitTimer = null;
+    var wakeRec = null;
+    var WAKE = /\b(hey|hi|hay|hello|okay|ok)[\s,]*(buddy|body|buddi|buddie|bodi|badi)\b|(हे|हेलो|हैलो)\s*(बडी|बड्डी|बॉडी)/i;
+
+    function setBusy(v) {
+      clearTimeout(busyTimer);
+      if (v) {
+        busy = true;
+        busyTimer = setTimeout(function () { busy = false; }, 60000);
+      } else {
+        busyTimer = setTimeout(function () { busy = false; }, 700);
+      }
+    }
 
     function pickLang(text) {
       if (/[\u0A80-\u0AFF]/.test(text)) return "gu-IN";
@@ -92,6 +112,7 @@
       var status = document.getElementById("status");
       playToken++;
       var myToken = playToken;
+      setBusy(true);
       if (currentAudio) { currentAudio.pause(); currentAudio = null; }
       window.speechSynthesis.cancel();
       var sentences = splitSentences(text);
@@ -101,7 +122,11 @@
 
       function playNext(i) {
         if (myToken !== playToken) return;
-        if (i >= jobs.length) { status.textContent = ""; return; }
+        if (i >= jobs.length) {
+          status.textContent = listening ? "Listening for 'Hey Buddy'..." : "";
+          setBusy(false);
+          return;
+        }
         jobs[i].then(function (d) {
           if (myToken !== playToken) return;
           if (!d) {
@@ -128,6 +153,7 @@
     function askBuddy(text) {
       var answer = document.getElementById("answer");
       answer.textContent = "BUDDY is thinking...";
+      setBusy(true);
       fetch(BRAIN_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -140,7 +166,19 @@
         })
         .catch(function () {
           answer.textContent = "BUDDY could not reach its brain.";
+          setBusy(false);
         });
+    }
+
+    function runCommand(text) {
+      document.getElementById("heard").textContent = "You said: " + text;
+      if (text.toLowerCase().indexOf("good morning") !== -1) {
+        var greet = "Good morning! How can I help you today?";
+        document.getElementById("answer").textContent = "BUDDY: " + greet;
+        speak(greet);
+      } else {
+        askBuddy(text);
+      }
     }
 
     function startListening() {
@@ -148,6 +186,7 @@
       var heard = document.getElementById("heard");
       var btn = document.getElementById("micBtn");
       if (!SR) { heard.textContent = "Speech listening is not supported in this browser."; return; }
+      if (listening) { heard.textContent = "Stop listening mode first."; return; }
       var rec = new SR();
       rec.lang = document.getElementById("langList").value;
       rec.interimResults = false;
@@ -156,15 +195,7 @@
         heard.textContent = "";
       };
       rec.onresult = function (e) {
-        var text = e.results[0][0].transcript;
-        heard.textContent = "You said: " + text;
-        if (text.toLowerCase().indexOf("good morning") !== -1) {
-          var greet = "Good morning! How can I help you today?";
-          document.getElementById("answer").textContent = "BUDDY: " + greet;
-          speak(greet);
-        } else {
-          askBuddy(text);
-        }
+        runCommand(e.results[0][0].transcript);
       };
       rec.onerror = function (e) {
         heard.textContent = "Mic problem: " + e.error;
@@ -173,6 +204,83 @@
         btn.textContent = "🎤 Tap to Talk";
       };
       rec.start();
+    }
+
+    function updateWakeBtn() {
+      document.getElementById("wakeBtn").textContent = listening ? "⏹ Stop Listening" : "👂 Start Listening";
+    }
+
+    function handleHeard(text) {
+      var heard = document.getElementById("heard");
+      text = (text || "").trim();
+      if (!text || busy) return;
+      var m = text.match(WAKE);
+      if (m) {
+        var cmd = text.replace(WAKE, "").replace(/^[\s,.!?]+/, "").trim();
+        if (cmd) {
+          awaiting = false;
+          runCommand(cmd);
+        } else {
+          heard.textContent = "Heard: " + text;
+          awaiting = true;
+          clearTimeout(awaitTimer);
+          awaitTimer = setTimeout(function () { awaiting = false; }, 20000);
+          document.getElementById("answer").textContent = "BUDDY: Yes?";
+          speak("Yes?");
+        }
+        return;
+      }
+      if (awaiting) {
+        awaiting = false;
+        clearTimeout(awaitTimer);
+        runCommand(text);
+      }
+    }
+
+    function toggleWake() {
+      if (listening) { stopWake(); } else { startWake(); }
+    }
+
+    function startWake() {
+      var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      var heard = document.getElementById("heard");
+      var status = document.getElementById("status");
+      if (!SR) { heard.textContent = "Speech listening is not supported in this browser."; return; }
+      listening = true;
+      updateWakeBtn();
+      status.textContent = "Listening for 'Hey Buddy'...";
+      wakeRec = new SR();
+      wakeRec.lang = document.getElementById("langList").value;
+      wakeRec.continuous = true;
+      wakeRec.interimResults = false;
+      wakeRec.onresult = function (e) {
+        for (var i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) { handleHeard(e.results[i][0].transcript); }
+        }
+      };
+      wakeRec.onerror = function (e) {
+        if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+          listening = false;
+          updateWakeBtn();
+          heard.textContent = "Mic problem: " + e.error;
+        }
+      };
+      wakeRec.onend = function () {
+        if (listening) {
+          setTimeout(function () { try { wakeRec.start(); } catch (x) {} }, 300);
+        } else {
+          document.getElementById("status").textContent = "";
+        }
+      };
+      try { wakeRec.start(); } catch (x) {}
+    }
+
+    function stopWake() {
+      listening = false;
+      awaiting = false;
+      updateWakeBtn();
+      if (wakeRec) { try { wakeRec.stop(); } catch (x) {} }
+      document.getElementById("status").textContent = "";
     }
   </script>
 </body>
