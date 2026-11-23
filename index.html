@@ -56,7 +56,10 @@
     var awaitTimer = null;
     var wakeRec = null;
     var wakeLock = null;
+    var history = [];
+    var lastReply = "";
     var WAKE = /\b(hey|hi|hay|hello|okay|ok)[\s,]*(buddy|body|buddi|buddie|bodi|badi)\b|(हे|हेलो|हैलो)\s*(बडी|बड्डी|बॉडी)/i;
+    var STOPWORDS = /\b(stop|bye|goodbye|thanks|thank you|that's all|never mind|no thanks)\b/i;
 
     function getLock() {
       if (navigator.wakeLock) {
@@ -74,8 +77,30 @@
         busy = true;
         busyTimer = setTimeout(function () { busy = false; }, 60000);
       } else {
-        busyTimer = setTimeout(function () { busy = false; }, 700);
+        busyTimer = setTimeout(function () { busy = false; }, 1500);
       }
+    }
+
+    function norm(s) {
+      return (s || "").toLowerCase().replace(/[^a-z0-9\u0900-\u097F\u0A80-\u0AFF ]/g, "").replace(/\s+/g, " ").trim();
+    }
+
+    function isEcho(text) {
+      var n = norm(text);
+      var l = norm(lastReply);
+      if (!n || !l) return false;
+      if (n === l) return true;
+      return n.length >= 5 && l.indexOf(n) !== -1;
+    }
+
+    function openFollowUp() {
+      awaiting = true;
+      clearTimeout(awaitTimer);
+      awaitTimer = setTimeout(function () {
+        awaiting = false;
+        if (listening) { document.getElementById("status").textContent = "Listening for 'Hey Buddy'..."; }
+      }, 14000);
+      document.getElementById("status").textContent = "Go ahead, I'm listening...";
     }
 
     function pickLang(text) {
@@ -119,10 +144,11 @@
         .catch(function () { return null; });
     }
 
-    function speak(text) {
+    function speak(text, opts) {
       var status = document.getElementById("status");
       playToken++;
       var myToken = playToken;
+      lastReply = text;
       setBusy(true);
       if (currentAudio) { currentAudio.pause(); currentAudio = null; }
       window.speechSynthesis.cancel();
@@ -134,8 +160,12 @@
       function playNext(i) {
         if (myToken !== playToken) return;
         if (i >= jobs.length) {
-          status.textContent = listening ? "Listening for 'Hey Buddy'..." : "";
           setBusy(false);
+          if (listening && !(opts && opts.noFollow)) {
+            openFollowUp();
+          } else {
+            status.textContent = listening ? "Listening for 'Hey Buddy'..." : "";
+          }
           return;
         }
         jobs[i].then(function (d) {
@@ -168,11 +198,16 @@
       fetch(BRAIN_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text })
+        body: JSON.stringify({ text: text, history: history })
       })
         .then(function (r) { return r.json(); })
         .then(function (d) {
           answer.textContent = "BUDDY: " + d.reply;
+          if (d.reply && d.reply.indexOf("Brain error") !== 0) {
+            history.push({ role: "user", text: text });
+            history.push({ role: "model", text: d.reply });
+            history = history.slice(-8);
+          }
           speak(d.reply);
         })
         .catch(function () {
@@ -225,17 +260,16 @@
       var heard = document.getElementById("heard");
       text = (text || "").trim();
       if (!text || busy) return;
+      if (isEcho(text)) return;
       var m = text.match(WAKE);
       if (m) {
         var cmd = text.replace(WAKE, "").replace(/^[\s,.!?]+/, "").trim();
         if (cmd) {
           awaiting = false;
+          clearTimeout(awaitTimer);
           runCommand(cmd);
         } else {
           heard.textContent = "Heard: " + text;
-          awaiting = true;
-          clearTimeout(awaitTimer);
-          awaitTimer = setTimeout(function () { awaiting = false; }, 20000);
           document.getElementById("answer").textContent = "BUDDY: Yes?";
           speak("Yes?");
         }
@@ -244,6 +278,13 @@
       if (awaiting) {
         awaiting = false;
         clearTimeout(awaitTimer);
+        if (STOPWORDS.test(text)) {
+          heard.textContent = "You said: " + text;
+          var bye = "Okay, I'm here whenever you need me.";
+          document.getElementById("answer").textContent = "BUDDY: " + bye;
+          speak(bye, { noFollow: true });
+          return;
+        }
         runCommand(text);
       }
     }
@@ -291,6 +332,7 @@
     function stopWake() {
       listening = false;
       awaiting = false;
+      clearTimeout(awaitTimer);
       updateWakeBtn();
       dropLock();
       if (wakeRec) { try { wakeRec.stop(); } catch (x) {} }
