@@ -55,7 +55,18 @@
     var awaiting = false;
     var awaitTimer = null;
     var wakeRec = null;
+    var wakeLock = null;
     var WAKE = /\b(hey|hi|hay|hello|okay|ok)[\s,]*(buddy|body|buddi|buddie|bodi|badi)\b|(हे|हेलो|हैलो)\s*(बडी|बड्डी|बॉडी)/i;
+
+    function getLock() {
+      if (navigator.wakeLock) {
+        navigator.wakeLock.request("screen").then(function (l) { wakeLock = l; }).catch(function () {});
+      }
+    }
+
+    function dropLock() {
+      if (wakeLock) { try { wakeLock.release(); } catch (x) {} wakeLock = null; }
+    }
 
     function setBusy(v) {
       clearTimeout(busyTimer);
@@ -248,6 +259,7 @@
       if (!SR) { heard.textContent = "Speech listening is not supported in this browser."; return; }
       listening = true;
       updateWakeBtn();
+      getLock();
       status.textContent = "Listening for 'Hey Buddy'...";
       wakeRec = new SR();
       wakeRec.lang = document.getElementById("langList").value;
@@ -262,6 +274,7 @@
         if (e.error === "not-allowed" || e.error === "service-not-allowed") {
           listening = false;
           updateWakeBtn();
+          dropLock();
           heard.textContent = "Mic problem: " + e.error;
         }
       };
@@ -279,9 +292,17 @@
       listening = false;
       awaiting = false;
       updateWakeBtn();
+      dropLock();
       if (wakeRec) { try { wakeRec.stop(); } catch (x) {} }
       document.getElementById("status").textContent = "";
     }
+
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden && listening) {
+        stopWake();
+        document.getElementById("heard").textContent = "BUDDY stopped listening because the app was closed. Tap Start Listening again.";
+      }
+    });
   </script>
 </body>
 </html>
